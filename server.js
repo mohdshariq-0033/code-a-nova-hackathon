@@ -19,10 +19,7 @@ app.use('/api/hackathon', hackathonRoutes);
 
 // Database Connection & Server Start
 const PORT = process.env.PORT || 5000;
-mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/code-a-nova', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/code-a-nova')
 .then(() => {
   console.log('MongoDB Connected Successfully');
   app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
