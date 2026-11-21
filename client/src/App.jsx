@@ -58,7 +58,8 @@ export default function App() {
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [registrationDetails, setRegistrationDetails] = useState(null);
 
-  const BACKEND_URL = 'http://localhost:5000/api';
+  const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+  const BACKEND_URL = `${API_BASE.replace(/\/+$/, '')}/api`;
 
   // Automatically clear message smoothly after 3 seconds
   useEffect(() => {
