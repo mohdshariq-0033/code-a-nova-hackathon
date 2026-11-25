@@ -1,21 +1,39 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const nodemailer = require('nodemailer');
 
-// Configure Nodemailer transporter with IPv4 and port 465 for Render reliability
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
-  family: 4,
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+async function sendOtpEmail({ toEmail, otp }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.SENDER_EMAIL || process.env.EMAIL_USER;
+
+  if (!apiKey || !senderEmail) {
+    throw new Error('Missing BREVO_API_KEY or SENDER_EMAIL in environment variables.');
+  }
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: 'Code-a-Nova',
+        email: senderEmail,
+      },
+      to: [{ email: toEmail }],
+      subject: 'Code-a-Nova - Password Reset OTP',
+      htmlContent: `<h3>Password Reset Request</h3><p>Your OTP for resetting password is: <b>${otp}</b>. It is valid for 10 minutes.</p>`,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || `Email API failed with status ${response.status}`);
+  }
+
+  return data;
+}
 
 /**
  * @desc    Send password reset OTP to user email
@@ -42,13 +60,8 @@ exports.forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    // Send OTP via email
-    await transporter.sendMail({
-      from: `"Code-a-Nova" <${process.env.EMAIL_USER}>`,
-      to: user.email,
-      subject: 'Code-a-Nova - Password Reset OTP',
-      html: `<h3>Password Reset Request</h3><p>Your OTP for resetting password is: <b>${resetOtp}</b>. It is valid for 10 minutes.</p>`,
-    });
+    // Send OTP via Brevo HTTPS API
+    await sendOtpEmail({ toEmail: user.email, otp: resetOtp });
 
     return res.status(200).json({
       success: true,
