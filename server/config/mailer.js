@@ -1,40 +1,62 @@
-const nodemailer = require('nodemailer');
+async function sendViaBrevo({ to, subject, htmlContent }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.SENDER_EMAIL || process.env.EMAIL_USER;
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+  if (!apiKey || !senderEmail) {
+    throw new Error('Missing BREVO_API_KEY or SENDER_EMAIL in environment variables.');
   }
-});
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: 'Code-a-Nova',
+        email: senderEmail,
+      },
+      to: Array.isArray(to) ? to.map((email) => ({ email })) : [{ email: to }],
+      subject,
+      htmlContent,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || `Brevo API failed with status ${response.status}`);
+  }
+
+  return data;
+}
 
 const sendOTPEmail = async (email, otp) => {
-  const mailOptions = {
-    from: `Code-a-Nova <${process.env.EMAIL_USER}>`,
+  return sendViaBrevo({
     to: email,
     subject: 'Verification OTP - Code-a-Nova Portal',
-    html: `
+    htmlContent: `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2>Welcome to Code-a-Nova!</h2>
         <p>Your 6-digit OTP for email verification is:</p>
         <h1 style="color: #4F46E5; letter-spacing: 4px;">${otp}</h1>
         <p>This OTP is valid for <strong>10 minutes</strong>. Do not share it with anyone.</p>
       </div>
-    `
-  };
-  return transporter.sendMail(mailOptions);
+    `,
+  });
 };
 
 const sendConfirmationEmail = async (email, details) => {
-  const membersList = details.teamMembers && details.teamMembers.length > 0
-    ? details.teamMembers.map(m => `<li>${m.memberName} (${m.memberEmail})</li>`).join('')
-    : '<li>Solo Participant</li>';
+  const membersList =
+    details.teamMembers && details.teamMembers.length > 0
+      ? details.teamMembers.map((m) => `<li>${m.memberName} (${m.memberEmail})</li>`).join('')
+      : '<li>Solo Participant</li>';
 
-  const mailOptions = {
-    from: `Code-a-Nova <${process.env.EMAIL_USER}>`,
+  return sendViaBrevo({
     to: email,
     subject: 'Hackathon Registration Confirmed - Code-a-Nova',
-    html: `
+    htmlContent: `
       <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
         <h2>Hackathon Registration Confirmed!</h2>
         <p>Dear <strong>${details.fullName}</strong>,</p>
@@ -52,9 +74,8 @@ const sendConfirmationEmail = async (email, details) => {
         <br/>
         <p>Best Regards,<br/><strong>Team Code-a-Nova</strong></p>
       </div>
-    `
-  };
-  return transporter.sendMail(mailOptions);
+    `,
+  });
 };
 
 module.exports = { sendOTPEmail, sendConfirmationEmail };
