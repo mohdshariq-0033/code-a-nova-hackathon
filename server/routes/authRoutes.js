@@ -3,28 +3,52 @@ const router = express.Router();
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const nodemailer = require('nodemailer');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'code_a_nova_secret_key';
 
-// Nodemailer Transporter Setup
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS
+async function sendBrevoEmail({ to, subject, htmlContent }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = process.env.SENDER_EMAIL || process.env.EMAIL_USER;
+
+  if (!apiKey || !senderEmail) {
+    throw new Error('Missing BREVO_API_KEY or SENDER_EMAIL in environment variables.');
   }
-});
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name: 'Code-a-Nova',
+        email: senderEmail,
+      },
+      to: [{ email: to }],
+      subject,
+      htmlContent,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.message || `Brevo API failed with status ${response.status}`);
+  }
+
+  return data;
+}
 
 // 1. Signup Route
 router.post('/signup', async (req, res) => {
   try {
     const { fullName, email, password } = req.body;
-    
+
     const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$%^&*(),.?":{}|<>]).{6,}$/;
     if (!passwordRegex.test(password)) {
-      return res.status(400).json({ 
-        message: 'Password must be at least 6 characters long and contain at least 1 capital letter and 1 special character.' 
+      return res.status(400).json({
+        message: 'Password must be at least 6 characters long and contain at least 1 capital letter and 1 special character.',
       });
     }
 
@@ -51,21 +75,20 @@ router.post('/signup', async (req, res) => {
         password: hashedPassword,
         otp,
         otpExpires,
-        isVerified: false
+        isVerified: false,
       });
       await user.save();
     }
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    await sendBrevoEmail({
       to: email,
       subject: 'Code-A-Nova Email Verification OTP',
-      html: `<h3>Hello ${fullName},</h3><p>Your OTP for email verification is: <b>${otp}</b>. Valid for 15 minutes.</p>`
-    };
+      htmlContent: `<h3>Hello ${fullName},</h3><p>Your OTP for email verification is: <b>${otp}</b>. Valid for 15 minutes.</p>`,
+    });
 
-    await transporter.sendMail(mailOptions);
     res.status(200).json({ message: 'OTP sent to your email. Please verify to complete signup.' });
   } catch (err) {
+    console.error('Signup OTP error:', err);
     res.status(500).json({ message: 'Server Error: ' + err.message });
   }
 });
@@ -96,7 +119,7 @@ router.post('/verify-otp', async (req, res) => {
     res.status(200).json({
       message: 'Email verified successfully!',
       token,
-      user: { id: user._id, fullName: user.fullName, email: user.email }
+      user: { id: user._id, fullName: user.fullName, email: user.email },
     });
   } catch (err) {
     res.status(500).json({ message: 'Server Error: ' + err.message });
@@ -122,7 +145,7 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: user._id, fullName: user.fullName, email: user.email }
+      user: { id: user._id, fullName: user.fullName, email: user.email },
     });
   } catch (err) {
     res.status(500).json({ message: 'Server Error: ' + err.message });
@@ -144,21 +167,20 @@ router.post('/forgot-password-otp', async (req, res) => {
     user.resetPasswordExpires = Date.now() + 15 * 60 * 1000; // 15 minutes valid
     await user.save();
 
-    const mailOptions = {
-      from: process.env.EMAIL_USER,
+    await sendBrevoEmail({
       to: email,
       subject: 'Password Reset Verification OTP - Code-A-Nova',
-      html: `<h3>Password Reset Request</h3><p>Your OTP to verify and reset password is: <b>${resetOtp}</b>. Valid for 15 minutes.</p>`
-    };
+      htmlContent: `<h3>Password Reset Request</h3><p>Your OTP to verify and reset password is: <b>${resetOtp}</b>. Valid for 15 minutes.</p>`,
+    });
 
-    await transporter.sendMail(mailOptions);
     res.status(200).json({ message: 'OTP sent to your email. Please verify to proceed.' });
   } catch (err) {
+    console.error('Forgot password OTP error:', err);
     res.status(500).json({ message: 'Server Error: ' + err.message });
   }
 });
 
-// 5. Step 2: Verify Forgot Password OTP (Pehle OTP verify hoga)
+// 5. Step 2: Verify Forgot Password OTP
 router.post('/verify-forgot-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -178,7 +200,7 @@ router.post('/verify-forgot-otp', async (req, res) => {
   }
 });
 
-// 6. Step 3: Final Reset Password Route (Password change option with confirmation)
+// 6. Step 3: Final Reset Password Route
 router.post('/reset-password', async (req, res) => {
   try {
     const { email, otp, newPassword, confirmNewPassword } = req.body;
@@ -189,8 +211,8 @@ router.post('/reset-password', async (req, res) => {
 
     const passwordRegex = /^(?=.*[A-Z])(?=.*[!@#$%^&*(),.?":{}|<>]).{6,}$/;
     if (!passwordRegex.test(newPassword)) {
-      return res.status(400).json({ 
-        message: 'Password must be at least 6 characters long and contain at least 1 capital letter and 1 special character.' 
+      return res.status(400).json({
+        message: 'Password must be at least 6 characters long and contain at least 1 capital letter and 1 special character.',
       });
     }
 
